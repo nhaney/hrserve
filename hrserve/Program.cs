@@ -6,12 +6,18 @@ namespace hrserve
 {
     class Program
     {
-        static async Task Main(string[] args)
+        static void Main(string[] args)
         {
-            var server = new HttpFileServer("localhost", 8000, "../");
-            var task = Task.Run(() => server.Run());
-            Console.WriteLine("Server should be running at localhost:8000");
-            await Task.Delay(-1);
+            var server = new BrowserReloadingHttpFileServer("localhost", 8000, "../");
+            try 
+            {
+                Console.WriteLine("Running server on http://localhost:8000");
+                server.Run();
+            }
+            finally
+            {
+                server.Stop();
+            }
         }
     }
 }
