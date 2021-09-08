@@ -39,7 +39,6 @@ namespace HotReloadServer
                 var ctx = this._listener.GetContext();
                 Console.WriteLine($"Request: {ctx.Request.HttpMethod}: {ctx.Request.Url}");
                 ProcessRequest(ctx);
-
             }
         }
 
@@ -86,6 +85,7 @@ namespace HotReloadServer
         protected virtual void AddFileMetadataToResponse(HttpListenerResponse response, string filePath)
         {
             response.ContentType = GetMimeTypeOfFile(filePath);
+            response.ContentEncoding = GetEncodingOfFile(filePath);
             FileInfo fileInfo = new FileInfo(filePath);
             response.ContentLength64 = fileInfo.Length;
             response.AddHeader("Last-Modified", fileInfo.LastWriteTime.ToString("r"));
@@ -123,7 +123,6 @@ namespace HotReloadServer
             return requestedFilePath;
         }
 
-
         private void AddNotFoundResponse(HttpListenerResponse response, string invalidPath)
         {
             var formattedResponse = String.Format(_notFoundTemplate, invalidPath);
@@ -159,6 +158,19 @@ namespace HotReloadServer
             }
 
             return mimeType;
+        }
+
+        private static Encoding GetEncodingOfFile(string filePath)
+        {
+            using (var reader = new StreamReader(filePath, Encoding.Default, true))
+            {
+                if (reader.Peek() >= 0)
+                {
+                    reader.Read();
+                }
+
+                return reader.CurrentEncoding;
+            }
         }
     }
 }
