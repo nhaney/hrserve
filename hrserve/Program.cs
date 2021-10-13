@@ -8,14 +8,15 @@ namespace hrserve
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             var server = new BrowserReloadingHttpFileServer("localhost", 8000, "../");
-            Task.Run(() => RefreshAfterSomeTime(server));
+            var source = new CancellationTokenSource();
+            var token = source.Token;
             try 
             {
                 Console.WriteLine("Running server on http://localhost:8000");
-                server.Run();
+                await server.Run(token);
             }
             finally
             {

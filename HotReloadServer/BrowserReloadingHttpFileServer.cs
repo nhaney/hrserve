@@ -17,11 +17,27 @@ namespace HotReloadServer
         private static int _socketCounter = 0;
         private readonly string _javaScriptToInject;
         private readonly ConcurrentDictionary<int, Channel<string>> _clientChannels;
+        private readonly ConcurrentDictionary<int, Task> _clientTasks;
 
-        public BrowserReloadingHttpFileServer(string address, int port, string watchDir) : base(address, port, watchDir)
+        public BrowserReloadingHttpFileServer(string address, int port, string watchDir, int maxConcurrentRequests = 1) : base(address, port, watchDir, maxConcurrentRequests)
         {
             _javaScriptToInject = GenerateJavaScriptToInject(address, port);
             _clientChannels = new ConcurrentDictionary<int, Channel<string>>();
+            _clientTasks = new ConcurrentDictionary<int, Task>();
+        }
+
+
+        /// <summary>
+        /// Refresh every websocket client connected to the server. 
+        /// </summary>
+        /// <returns></returns>
+        public async Task RefreshClients()
+        {
+            foreach (var clientEntry in _clientChannels)
+            {
+                Console.WriteLine($"Refreshing client {clientEntry.Key}");
+                await clientEntry.Value.Writer.WriteAsync("test");
+            }
         }
 
         /// <summary>
@@ -29,23 +45,19 @@ namespace HotReloadServer
         /// processing like the normal HttpFileServer.
         /// </summary>
         /// <param name="ctx"></param>
-        protected override void ProcessRequest(HttpListenerContext ctx)
+        protected override async Task ProcessRequest(HttpListenerContext ctx)
         {
             if (ctx.Request.IsWebSocketRequest)
             {
-                
                 try
                 {
-                    var wsAcceptTask = ctx.AcceptWebSocketAsync(null);
-                    wsAcceptTask.Wait(TimeSpan.FromSeconds(5));
-                    var wsContext = wsAcceptTask.Result;
-
+                    var wsContext = await ctx.AcceptWebSocketAsync(null);
                     int socketId = Interlocked.Increment(ref _socketCounter);
                     var socketChannel = Channel.CreateUnbounded<string>();
                     _clientChannels.TryAdd(socketId, socketChannel);
 
                     Console.WriteLine($"Socket {socketId}: New connection.");
-                    _ = Task.Run(() => HandleWebsocketClient(wsContext, socketId));
+                    _ = HandleWebsocketClient(wsContext, socketId);
                 }
                 catch (Exception)
                 {
@@ -57,7 +69,7 @@ namespace HotReloadServer
             }
             else
             {
-                base.ProcessRequest(ctx);
+                await base.ProcessRequest(ctx);
             }
         }
 
@@ -66,17 +78,17 @@ namespace HotReloadServer
             base.AddFileMetadataToResponse(response, filePath);
         }
 
-        protected override void AddFileContentsToResponseBody(HttpListenerResponse response, string filePath)
+        protected override async Task FinalizeResponse(HttpListenerResponse response, Stream finalResponseBodyStream)
         {
             if (response.ContentType != "text/html")
             {
-                base.AddFileContentsToResponseBody(response, filePath);
+                await base.FinalizeResponse(response, finalResponseBodyStream);
                 return;
             }
 
             // inject the javascript into the response
             var htmlDoc = new HtmlDocument();
-            htmlDoc.Load(filePath);
+            htmlDoc.Load(finalResponseBodyStream);
 
             var scriptElement = HtmlNode.CreateNode($"<script>\n{_javaScriptToInject}\n</script>");
             var headElement = htmlDoc.DocumentNode.SelectSingleNode("//head");
@@ -95,19 +107,11 @@ namespace HotReloadServer
             {
                 throw new Exception("Content encoding not set before injecting javascript!");
             }
-
             response.ContentLength64 = response.ContentEncoding.GetBytes(htmlDoc.DocumentNode.OuterHtml).Length;
+
             htmlDoc.Save(response.OutputStream);
         }
 
-        public async Task RefreshClients()
-        {
-            foreach (var clientEntry in _clientChannels)
-            {
-                Console.WriteLine($"Refreshing client {clientEntry.Key}");
-                await clientEntry.Value.Writer.WriteAsync("test");
-            }
-        }
 
         private string GenerateJavaScriptToInject(string address, int port)
         {
